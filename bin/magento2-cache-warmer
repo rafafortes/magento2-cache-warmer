@@ -1,0 +1,29 @@
+#!/usr/bin/env php
+<?php
+declare(strict_types=1);
+
+$autoloadCandidates = [
+    // Development checkout: the package owns its Composer directory.
+    dirname(__DIR__) . '/vendor/autoload.php',
+    // Installed dependency: Composer owns the vendor directory three levels up.
+    dirname(__DIR__, 3) . '/autoload.php',
+    // Composer bin proxy or an invocation from the application root.
+    getcwd() . '/vendor/autoload.php',
+];
+
+$autoloadFound = false;
+foreach ($autoloadCandidates as $autoloadPath) {
+    if (is_file($autoloadPath)) {
+        require $autoloadPath;
+        $autoloadFound = true;
+        break;
+    }
+}
+
+if (!$autoloadFound) {
+    fwrite(STDERR, "Composer autoloader not found. Run 'composer install' in the magento2-cache-warmer project.\n");
+    exit(1);
+}
+
+$exitCode = Magento2CacheWarmer\Cli\Magento2CacheWarmerCommand::run(array_slice($argv, 1));
+exit($exitCode);

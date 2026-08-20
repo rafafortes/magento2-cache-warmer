@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<ruleset name="Magento2CacheWarmer">
+    <description>Conservative PHPMD baseline for Magento2CacheWarmer.</description>
+    <rule ref="rulesets/cleancode.xml">
+        <exclude name="StaticAccess" />
+        <exclude name="BooleanArgumentFlag" />
+        <exclude name="ElseExpression" />
+        <exclude name="IfStatementAssignment" />
+        <exclude name="MethodArgumentCouldBeAvoided" />
+        <exclude name="MissingImport" />
+        <exclude name="ForLoopShouldBeWhileLoop" />
+        <exclude name="WhileLoopShouldBeForLoop" />
+    </rule>
+    <rule ref="rulesets/codesize.xml">
+        <exclude name="CyclomaticComplexity" />
+        <exclude name="NPathComplexity" />
+        <exclude name="ExcessiveMethodLength" />
+        <exclude name="ExcessiveClassLength" />
+    </rule>
+</ruleset>

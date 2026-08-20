@@ -1,0 +1,6 @@
+.idea/
+/vendor/
+/build/
+.pi-glla/
+.phpunit.result.cache
+.phpunit.cache/
