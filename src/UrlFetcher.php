@@ -8,6 +8,7 @@ use Magento2CacheWarmer\Crawl\CrawlResult;
 use Magento2CacheWarmer\Crawl\Crawler;
 use Magento2CacheWarmer\Http\CurlMultiHttpClient;
 use Magento2CacheWarmer\Http\HttpClientInterface;
+use Magento2CacheWarmer\Http\RetryingHttpClient;
 use Magento2CacheWarmer\Output\OutputInterface;
 use Magento2CacheWarmer\Security\HostResolverInterface;
 use Magento2CacheWarmer\Security\UrlGuard;
@@ -27,7 +28,8 @@ final class UrlFetcher implements UrlFetcherInterface
         ?HttpClientInterface $httpClient = null,
         ?OutputInterface $output = null,
         array $trustedPrivateHosts = [],
-        ?HostResolverInterface $resolver = null
+        ?HostResolverInterface $resolver = null,
+        int $maxRetries = 0
     ) {
         if (filter_var($sitemapUrl, FILTER_VALIDATE_URL) === false) {
             throw new \InvalidArgumentException('The sitemap URL must be a valid URL.');
@@ -35,10 +37,16 @@ final class UrlFetcher implements UrlFetcherInterface
         if ($maxThreads < 1) {
             throw new \InvalidArgumentException('The thread count must be at least 1.');
         }
+        if ($maxRetries < 0) {
+            throw new \InvalidArgumentException('The retry count must not be negative.');
+        }
         $this->sitemapUrl = $sitemapUrl;
         $this->maxThreads = $maxThreads;
         $this->urlGuard = new UrlGuard($sitemapUrl, $trustedPrivateHosts, $resolver);
-        $this->httpClient = $httpClient ?? new CurlMultiHttpClient(urlGuard: $this->urlGuard);
+        $client = $httpClient ?? new CurlMultiHttpClient(urlGuard: $this->urlGuard);
+        $this->httpClient = $maxRetries > 0
+            ? new RetryingHttpClient($client, $maxRetries)
+            : $client;
         $this->output = $output;
     }
 

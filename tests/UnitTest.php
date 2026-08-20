@@ -8,6 +8,8 @@ use Magento2CacheWarmer\Cli\Magento2CacheWarmerCommand;
 use Magento2CacheWarmer\Crawl\Crawler;
 use Magento2CacheWarmer\Http\CurlMultiHttpClient;
 use Magento2CacheWarmer\Http\FetchResult;
+use Magento2CacheWarmer\Http\HttpClientInterface;
+use Magento2CacheWarmer\Http\RetryingHttpClient;
 use Magento2CacheWarmer\Output\ConsoleOutput;
 use Magento2CacheWarmer\Output\TerminalSanitizer;
 use Magento2CacheWarmer\Security\UrlGuard;
@@ -103,10 +105,16 @@ final class UnitTest extends TestCase
         new UrlFetcher('not-a-url');
     }
 
-    public function testFacadeCachesResultAndRejectsInvalidThreads(): void
+    public function testFacadeCachesResultAndRejectsInvalidThreadsAndRetries(): void
     {
         $this->expectException(\InvalidArgumentException::class);
         new UrlFetcher('https://shop.test/sitemap.xml', 0);
+    }
+
+    public function testFacadeRejectsNegativeRetries(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new UrlFetcher('https://shop.test/sitemap.xml', 1, null, null, [], null, -1);
     }
 
     public function testFacadeRunsSitemapAndCliAcceptsOneOrTwoArguments(): void
@@ -128,12 +136,80 @@ final class UnitTest extends TestCase
         self::assertSame([], $fetcher->getFailedUrls());
 
         self::assertSame(0, Magento2CacheWarmerCommand::run([$sitemap, '2'], $fetcher, $output));
+        self::assertSame(0, Magento2CacheWarmerCommand::run([
+            '--sitemap=' . $sitemap,
+            '--threads=2',
+            '--retries=1',
+        ], $fetcher, $output));
         self::assertSame(1, Magento2CacheWarmerCommand::run([]));
         self::assertSame(1, Magento2CacheWarmerCommand::run([$sitemap, '0']));
         self::assertSame(1, Magento2CacheWarmerCommand::run(['https://shop.test', $sitemap]));
         self::assertSame(1, Magento2CacheWarmerCommand::run([$sitemap, '--debug']));
         $captured = $output->getCaptured();
         self::assertStringContainsString('Finished:', (string) end($captured));
+    }
+
+    public function testRetryingHttpClientRetriesTransientFailuresAndCallsBackOnce(): void
+    {
+        $url = 'https://shop.test/page';
+        $client = new class ($url) implements HttpClientInterface {
+            public int $calls = 0;
+
+            public function __construct(private string $url)
+            {
+            }
+
+            /** @param list<string> $urls @return array<string, FetchResult> */
+            public function fetchMultiple(array $urls, ?callable $onComplete = null): array
+            {
+                $this->calls++;
+                $status = $this->calls === 1 ? 503 : 200;
+                $result = FetchResult::create($this->url, [
+                    'httpCode' => $status,
+                    'body' => $status === 200 ? 'ok' : 'unavailable',
+                    'elapsedMs' => 1.5,
+                ]);
+                return [$this->url => $result];
+            }
+        };
+        $retrying = new RetryingHttpClient($client, 1, 0);
+        $callbacks = [];
+
+        $result = $retrying->fetchMultiple([$url], function (FetchResult $response) use (&$callbacks): void {
+            $callbacks[] = $response;
+        });
+
+        self::assertSame(2, $client->calls);
+        self::assertSame(200, $result[$url]->httpCode);
+        self::assertSame(3.0, $result[$url]->elapsedMs);
+        self::assertCount(1, $callbacks);
+    }
+
+    public function testRetryingHttpClientDoesNotRetryClientErrors(): void
+    {
+        $url = 'https://shop.test/page';
+        $client = new class ($url) implements HttpClientInterface {
+            public int $calls = 0;
+
+            public function __construct(private string $url)
+            {
+            }
+
+            /** @param list<string> $urls @return array<string, FetchResult> */
+            public function fetchMultiple(array $urls, ?callable $onComplete = null): array
+            {
+                $this->calls++;
+                return [$this->url => FetchResult::create($this->url, [
+                    'httpCode' => 404,
+                    'body' => 'not found',
+                    'elapsedMs' => 1.0,
+                ])];
+            }
+        };
+        $result = (new RetryingHttpClient($client, 3, 0))->fetchMultiple([$url]);
+
+        self::assertSame(1, $client->calls);
+        self::assertSame(404, $result[$url]->httpCode);
     }
 
     public function testUrlGuardBlocksDangerousAndExternalDestinations(): void

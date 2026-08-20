@@ -45,11 +45,14 @@ Run the CLI against a controlled host only:
 
 ```bash
 composer require rafafortes/magento2-cache-warmer
-vendor/bin/magento2-cache-warmer https://shop.test/sitemap.xml 5
+vendor/bin/magento2-cache-warmer \
+  --sitemap=https://shop.test/sitemap.xml --threads=5 --retries=3
 ```
 
-The arguments are `<sitemapUrl>` and an optional positive concurrency count.
-Every sitemap/page request is printed by default; there is no `--debug` option.
+The named options are `--sitemap=<url>`, `--threads=<positive-integer>`, and
+`--retries=<non-negative-integer>`. The legacy positional form remains
+accepted. Every sitemap/page request is printed after its final attempt; there
+is no `--debug` option.
 Set `CACHE_WARMER_TRUSTED_PRIVATE_HOSTS` to a comma-separated exact host list
 only when a local private origin is deliberately trusted.
 

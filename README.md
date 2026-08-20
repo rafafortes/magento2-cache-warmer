@@ -22,7 +22,7 @@ The executable is installed by Composer at `vendor/bin/magento2-cache-warmer`.
 ## Usage
 
 ```bash
-vendor/bin/magento2-cache-warmer <sitemapUrl> [threads]
+vendor/bin/magento2-cache-warmer --sitemap=<url> [--threads=<count>] [--retries=<count>]
 ```
 
 Example inside the PHP container:
@@ -30,20 +30,28 @@ Example inside the PHP container:
 ```bash
 cd /var/www/html
 vendor/bin/magento2-cache-warmer \
-  https://shop.test/feeds/sitemap.xml \
-  5
+  --sitemap=https://shop.test/feeds/sitemap.xml \
+  --threads=5 \
+  --retries=3
 ```
 
-Arguments:
+Options:
 
-- `sitemapUrl` — required URL of the sitemap reachable from the PHP
+- `--sitemap=<url>` — required URL of the sitemap reachable from the PHP
   container. The sitemap can be a regular sitemap or a sitemap index.
-- `threads` — optional positive integer; number of page requests made in
-  parallel. The default is `1`.
+- `--threads=<count>` — optional positive integer; number of page requests made
+  in parallel. The default is `1`.
+- `--retries=<count>` — optional non-negative integer; number of retries after
+  the initial attempt for transport failures and transient HTTP statuses
+  (`408`, `425`, `429`, and `500`–`504`). The default is `0`. Retry attempts use
+  a short exponential backoff. `--retry=<count>` is accepted as an alias.
 
-For every sitemap and page request, the command immediately prints the URL,
-HTTP status, result (`OK` or `FAIL`) and elapsed time. Blocked URLs are reported
-as `BLOCKED`. It prints a final count when the run finishes.
+The previous positional form, `<sitemapUrl> [threads]`, remains accepted for
+compatibility, but named options are recommended.
+
+For every sitemap and page request, the command prints the URL, HTTP status,
+result (`OK` or `FAIL`) and elapsed time after the final attempt. Blocked URLs
+are reported as `BLOCKED`. It prints a final count when the run finishes.
 
 Security rules are fail-closed: sitemap URLs must use the same HTTP(S) scheme,
 host and port as the sitemap, resolve to public addresses, and redirects are
@@ -53,7 +61,8 @@ name explicitly:
 
 ```bash
 CACHE_WARMER_TRUSTED_PRIVATE_HOSTS=shop.test \
-  vendor/bin/magento2-cache-warmer https://shop.test/feeds/sitemap.xml 5
+  vendor/bin/magento2-cache-warmer \
+  --sitemap=https://shop.test/feeds/sitemap.xml --threads=5 --retries=3
 ```
 
 The current version deliberately does **not** accept a base URL, follow links
@@ -67,7 +76,8 @@ use Magento2CacheWarmer\UrlFetcher;
 
 $warmer = new UrlFetcher(
     'https://example.com/sitemap.xml',
-    maxThreads: 5
+    maxThreads: 5,
+    maxRetries: 3
 );
 $successfulUrls = $warmer->getFetchedUrls();
 $failedUrls = $warmer->getFailedUrls();
@@ -75,12 +85,14 @@ $failedUrls = $warmer->getFailedUrls();
 
 ## Architecture
 
-- `UrlFetcher` is the public facade and accepts only the sitemap URL and
-  concurrency setting.
+- `UrlFetcher` is the public facade and accepts the sitemap URL, concurrency,
+  and retry settings.
 - `Crawler` loads the sitemap, expands sitemap indexes and fetches only their
   listed URLs.
 - `CurlMultiHttpClient` performs concurrent requests with TLS verification,
   redirects and bounded connect/total timeouts.
+- `RetryingHttpClient` retries transient failures without printing duplicate
+  progress lines.
 - `OutputInterface` and `ConsoleOutput` provide per-request progress output.
 - `HttpClientInterface` allows deterministic test doubles.
 

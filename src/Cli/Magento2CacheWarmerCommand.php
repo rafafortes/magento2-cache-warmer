@@ -19,30 +19,30 @@ final class Magento2CacheWarmerCommand
         ?UrlFetcherInterface $fetcher = null,
         ?OutputInterface $output = null
     ): int {
-        if (count($arguments) < 1 || count($arguments) > 2) {
-            fwrite(STDERR, "Usage: magento2-cache-warmer <sitemapUrl> [threads]\n");
+        try {
+            $options = self::parseArguments($arguments);
+        } catch (\InvalidArgumentException $exception) {
+            fwrite(STDERR, TerminalSanitizer::sanitize($exception->getMessage()) . "\n");
+            fwrite(STDERR, self::usage());
             return 1;
         }
 
-        $sitemapUrl = (string) $arguments[0];
-        $threads = 1;
-        if (isset($arguments[1])) {
-            if (!ctype_digit($arguments[1]) || (int) $arguments[1] < 1) {
-                fwrite(STDERR, "The thread count must be a positive integer.\n");
-                return 1;
-            }
-            $threads = (int) $arguments[1];
+        if ($options === null) {
+            fwrite(STDOUT, self::usage());
+            return 0;
         }
 
         try {
             $output ??= new ConsoleOutput();
             $trustedPrivateHosts = self::trustedPrivateHosts();
             $fetcher ??= new UrlFetcher(
-                $sitemapUrl,
-                $threads,
+                $options['sitemap'],
+                $options['threads'],
                 null,
                 $output,
-                $trustedPrivateHosts
+                $trustedPrivateHosts,
+                null,
+                $options['retries']
             );
             $started = microtime(true);
             $urls = $fetcher->getFetchedUrls();
@@ -61,6 +61,95 @@ final class Magento2CacheWarmerCommand
             fwrite(STDERR, TerminalSanitizer::sanitize('Error: ' . $exception->getMessage()) . "\n");
             return 1;
         }
+    }
+
+    /**
+     * @param list<string> $arguments
+     * @return array{sitemap: string, threads: int, retries: int}|null
+     */
+    private static function parseArguments(array $arguments): ?array
+    {
+        if (in_array('--help', $arguments, true)) {
+            return null;
+        }
+        if ($arguments === []) {
+            throw new \InvalidArgumentException('A sitemap URL is required.');
+        }
+
+        $hasOptions = str_starts_with($arguments[0], '--');
+        if (!$hasOptions) {
+            return self::parseLegacyArguments($arguments);
+        }
+
+        $values = [];
+        foreach ($arguments as $argument) {
+            if (!str_starts_with($argument, '--') || !str_contains($argument, '=')) {
+                throw new \InvalidArgumentException('Options must use the --parameter=value format.');
+            }
+            [$name, $value] = explode('=', $argument, 2);
+            if ($value === '') {
+                throw new \InvalidArgumentException($name . ' must not be empty.');
+            }
+            $canonicalName = $name === '--retry' ? '--retries' : $name;
+            if (!in_array($canonicalName, ['--sitemap', '--threads', '--retries'], true)) {
+                throw new \InvalidArgumentException('Unknown option: ' . $name);
+            }
+            if (isset($values[$canonicalName])) {
+                throw new \InvalidArgumentException('Option repeated: ' . $name);
+            }
+            $values[$canonicalName] = $value;
+        }
+
+        if (!isset($values['--sitemap'])) {
+            throw new \InvalidArgumentException('The --sitemap option is required.');
+        }
+
+        return [
+            'sitemap' => $values['--sitemap'],
+            'threads' => self::positiveInteger($values['--threads'] ?? '1', 'thread count'),
+            'retries' => self::nonNegativeInteger($values['--retries'] ?? '0', 'retry count'),
+        ];
+    }
+
+    /**
+     * @param list<string> $arguments
+     * @return array{sitemap: string, threads: int, retries: int}
+     */
+    private static function parseLegacyArguments(array $arguments): array
+    {
+        if (count($arguments) < 1 || count($arguments) > 2) {
+            throw new \InvalidArgumentException('Expected a sitemap URL and optional thread count.');
+        }
+
+        return [
+            'sitemap' => $arguments[0],
+            'threads' => self::positiveInteger($arguments[1] ?? '1', 'thread count'),
+            'retries' => 0,
+        ];
+    }
+
+    private static function positiveInteger(string $value, string $name): int
+    {
+        if (!ctype_digit($value) || (int) $value < 1) {
+            throw new \InvalidArgumentException('The ' . $name . ' must be a positive integer.');
+        }
+
+        return (int) $value;
+    }
+
+    private static function nonNegativeInteger(string $value, string $name): int
+    {
+        if (!ctype_digit($value)) {
+            throw new \InvalidArgumentException('The ' . $name . ' must be a non-negative integer.');
+        }
+
+        return (int) $value;
+    }
+
+    private static function usage(): string
+    {
+        return "Usage: magento2-cache-warmer --sitemap=<url> [--threads=<positive-int>] [--retries=<non-negative-int>]\n"
+            . "       magento2-cache-warmer <sitemapUrl> [threads]  (legacy format)\n";
     }
 
     /** @return list<string> */
